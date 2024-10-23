@@ -23,36 +23,38 @@ const server = http.createServer(async (req, res) => { // Створюємо HTT
   switch (req.method) { 
     case 'GET': // Якщо метод запиту - GET.
     try {
-      const data = await fs.readFile(filePath); // Спробуємо прочитати файл 
-      res.writeHead(200, { 'Content-Type': 'image/jpeg' }); 
-      res.end(data); // Відправляємо дані зображення
+        const data = await fs.readFile(filePath); // Спробуємо прочитати файл 
+        res.writeHead(200, { 'Content-Type': 'image/jpeg' }); 
+        res.end(data); // Відправляємо дані зображення
     } catch (err) {
-      if (err.code === 'ENOENT') { // Якщо файл не знайдено в кеші
-        try {
-          // Запит до http.cat за картинкою
-          const response = await superagent.get(`https://http.cat/${httpCode}`);
-          if (response.status === 200) { // Перевіряємо статус відповіді
-            const imageBuffer = response.body; // Отримуємо зображення
-  
-            // Зберігаємо картинку у кеш
-            await fs.writeFile(filePath, imageBuffer);
-            
-            res.writeHead(200, { 'Content-Type': 'image/jpeg' });
-            res.end(imageBuffer);
-          } else {
-            res.writeHead(404, { 'Content-Type': 'text/plain' }); // Якщо статус не 200
-            res.end('Not Found'); 
-          }
-        } catch (error) {
-          // У випадку, якщо запит до http.cat завершився помилкою
-          res.writeHead(404, { 'Content-Type': 'text/plain' }); // Якщо сталася помилка
-          res.end('Not Found');
+        if (err.code === 'ENOENT') { // Якщо файл не знайдено в кеші
+            try {
+                // Запит до http.cat за картинкою
+                const response = await superagent.get(`https://http.cat/${httpCode}`);
+                
+                if (response.status === 200) { // Перевіряємо статус відповіді
+                    const imageBuffer = response.body; // Отримуємо зображення
+                    
+                    // Зберігаємо картинку у кеш
+                    await fs.writeFile(filePath, imageBuffer);
+                    
+                    res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+                    res.end(imageBuffer);
+                } else {
+                    res.writeHead(404, { 'Content-Type': 'text/plain' }); // Якщо статус не 200
+                    res.end('Not Found'); 
+                }
+            } catch (error) {
+                // У випадку, якщо запит до http.cat завершився помилкою
+                res.writeHead(404, { 'Content-Type': 'text/plain' }); // Якщо сталася помилка
+                res.end('Not Found');
+            }
+        } else {
+            res.writeHead(500, { 'Content-Type': 'text/plain' }); 
+            res.end('Internal Server Error'); 
         }
-      } else {
-        res.writeHead(500, { 'Content-Type': 'text/plain' }); 
-        res.end('Internal Server Error'); 
-      }
     }
+
   
 
     case 'PUT': // Якщо метод запиту - PUT.
