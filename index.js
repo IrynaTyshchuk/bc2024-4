@@ -23,7 +23,7 @@ function getCacheFilePath(code) {
 const server = http.createServer(async (req, res) => {
   const { method, url } = req;
   const httpCode = url.slice(1); // Extract the code from URL
-  
+
   if (method === 'GET') {
     try {
       const filePath = getCacheFilePath(httpCode);
@@ -35,12 +35,18 @@ const server = http.createServer(async (req, res) => {
       console.error(`Image not found in cache. Attempting to load from http.cat: ${error.message}`);
       try {
         const response = await superagent.get(`https://http.cat/${httpCode}`);
-        const filePath = getCacheFilePath(httpCode);
-        await fsPromises.writeFile(filePath, response.body);
-        console.log(`Image saved to cache: ${filePath}`);
         
-        res.writeHead(200, { 'Content-Type': 'image/jpeg' });
-        res.end(response.body);
+        // Переконаємося, що отримане зображення є буфером
+        if (response && response.body) {
+          const filePath = getCacheFilePath(httpCode);
+          await fsPromises.writeFile(filePath, response.body);
+          console.log(`Image saved to cache: ${filePath}`);
+          
+          res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+          res.end(response.body);
+        } else {
+          throw new Error('Received invalid image data');
+        }
       } catch (fetchError) {
         console.error(`Failed to load image from https://http.cat/${httpCode}: ${fetchError.message}`);
         res.writeHead(404, { 'Content-Type': 'text/plain' });
