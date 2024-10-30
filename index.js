@@ -1,95 +1,86 @@
-const http = require('http'); 
-const { Command } = require('commander'); 
-const fs = require('fs/promises'); 
-const path = require('path'); 
-const superagent = require('superagent'); 
+const http = require('http');
+const { Command } = require('commander');
+const fs = require('fs');
+const path = require('path');
+const superagent = require('superagent');
 
-const program = new Command(); 
+const program = new Command();
 
 program
-  .option('-h, --host <host>', 'server address', 'localhost')
-  .option('-p, --port <port>', 'server port', 3000) 
-  .option('-c, --cache <path>', 'path to cache', './cache'); 
+  .requiredOption('-h, --host <host>', 'server address', 'localhost')
+  .requiredOption('-p, --port <port>', 'server port', 3000)
+  .requiredOption('-c, --cache <path>', 'path to cache', './cache');
 
-program.parse(process.argv); // Аналізуємо аргументи командного рядка.
+program.parse(process.argv);
 
-const { host, port, cache } = program.opts(); 
+const { host, port, cache } = program.opts();
+const fsPromises = fs.promises;
 
-const server = http.createServer(async (req, res) => { // Створюємо HTTP-сервер.
-  const urlParts = req.url.split('/'); 
-  const httpCode = urlParts[1]; // Отримуємо код HTTP з URL
-  const filePath = path.join(cache, `${httpCode}.jpg`); // Формуємо шлях до файлу
+function getCacheFilePath(code) {
+  return path.join(cache, `${code}.jpg`);
+}
 
-  switch (req.method) { 
-    case 'GET': // Якщо метод запиту - GET.
-    try {
-        const data = await fs.readFile(filePath); // Спробуємо прочитати файл 
-        res.writeHead(200, { 'Content-Type': 'image/jpeg' }); 
-        res.end(data); // Відправляємо дані зображення
-    } catch (err) {
-        if (err.code === 'ENOENT') { // Якщо файл не знайдено в кеші
-            try {
-                // Запит до http.cat за картинкою
-                const response = await superagent.get(`https://http.cat/${httpCode}`);
-                
-                if (response.status === 200) { // Перевіряємо статус відповіді
-                    const imageBuffer = response.body; // Отримуємо зображення
-                    
-                    // Зберігаємо картинку у кеш
-                    await fs.writeFile(filePath, imageBuffer);
-                    
-                    res.writeHead(200, { 'Content-Type': 'image/jpeg' });
-                    res.end(imageBuffer);
-                } else {
-                    res.writeHead(404, { 'Content-Type': 'text/plain' }); // Якщо статус не 200
-                    res.end('Not Found'); 
-                }
-            } catch (error) {
-                // У випадку, якщо запит до http.cat завершився помилкою
-                res.writeHead(404, { 'Content-Type': 'text/plain' }); // Якщо сталася помилка
-                res.end('Not Found');
-            }
-        } else {
-            res.writeHead(500, { 'Content-Type': 'text/plain' }); 
-            res.end('Internal Server Error'); 
-        }
-    }
-
+const server = http.createServer(async (req, res) => {
+  const { method, url } = req;
+  const httpCode = url.slice(1); // Extract the code from URL
   
-
-    case 'PUT': // Якщо метод запиту - PUT.
-      const chunks = []; // Масив для збору даних.
-      req.on('data', chunk => chunks.push(chunk)); // Додаємо дані у масив 
-      req.on('end', async () => { 
-        const imageBuffer = Buffer.concat(chunks); // Об'єднуємо дані у буфер.
-        await fs.writeFile(filePath, imageBuffer); // Записуємо буфер у файл 
-        res.writeHead(201, { 'Content-Type': 'text/plain' }); 
-        res.end('Created'); 
-      });
-      break;
-
-    case 'DELETE': // Якщо метод запиту - DELETE.
+  if (method === 'GET') {
+    try {
+      const filePath = getCacheFilePath(httpCode);
+      const data = await fsPromises.readFile(filePath);
+      console.log(`Image found in cache: ${filePath}`);
+      res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+      res.end(data);
+    } catch (error) {
+      console.error(`Image not found in cache. Attempting to load from http.cat: ${error.message}`);
       try {
-        await fs.unlink(filePath); // Спробуємо видалити файл 
-        res.writeHead(200, { 'Content-Type': 'text/plain' }); 
-        res.end('Deleted'); 
-      } catch (err) {
-        if (err.code === 'ENOENT') { // Якщо файл не знайдено.
-          res.writeHead(404, { 'Content-Type': 'text/plain' }); 
-          res.end('Not Found'); 
-        } else {
-          res.writeHead(500, { 'Content-Type': 'text/plain' }); 
-          res.end('Internal Server Error'); 
-        }
+        const response = await superagent.get(`https://http.cat/${httpCode}`);
+        const filePath = getCacheFilePath(httpCode);
+        await fsPromises.writeFile(filePath, response.body);
+        console.log(`Image saved to cache: ${filePath}`);
+        
+        res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+        res.end(response.body);
+      } catch (fetchError) {
+        console.error(`Failed to load image from https://http.cat/${httpCode}: ${fetchError.message}`);
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Image not found');
       }
-      break;
-
-    default: 
-      res.writeHead(405, { 'Content-Type': 'text/plain' }); 
-      res.end('Method Not Allowed'); 
+    }
+  } else if (method === 'PUT') {
+    let body = [];
+    req.on('data', chunk => body.push(chunk));
+    req.on('end', async () => {
+      try {
+        const filePath = getCacheFilePath(httpCode);
+        await fsPromises.writeFile(filePath, Buffer.concat(body));
+        console.log(`Image successfully saved to cache: ${filePath}`);
+        res.writeHead(201, { 'Content-Type': 'text/plain' });
+        res.end('Image saved successfully');
+      } catch (error) {
+        console.error(`Failed to save image: ${error.message}`);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Error saving image');
+      }
+    });
+  } else if (method === 'DELETE') {
+    try {
+      const filePath = getCacheFilePath(httpCode);
+      await fsPromises.unlink(filePath);
+      console.log(`Image successfully deleted: ${filePath}`);
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('Image deleted successfully');
+    } catch (error) {
+      console.error(`Image not found: ${error.message}`);
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Image not found');
+    }
+  } else {
+    res.writeHead(405, { 'Content-Type': 'text/plain' });
+    res.end('Method Not Allowed');
   }
 });
 
-server.listen(port, host, () => { // Запускаємо сервер 
-  console.log(`Server running at http://${host}:${port}/`); 
-}); 
+server.listen(port, host, () => {
+  console.log(`Server running at http://${host}:${port}/`);
+});
